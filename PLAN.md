@@ -45,7 +45,7 @@
 - `docs/task.xlsx` ← копия `tz.xlsx`.
 - **Готово, когда:** `pip install -e .[dev]` и `pytest` проходят (0 тестов), `docker compose up postgres` поднимается.
 
-### 2. [ ] Домен: сущности, правила, `decide()` + unit-тесты
+### 2. [x] Домен: сущности, правила, `decide()` + unit-тесты
 - `domain/models.py`: dataclass `Message`, `Attendance`, `Employee`, `Group`, `Binding`, `Decision`;
   `MessageStatus`, `Reason` (Enum); `domain/errors.py`: `NotFound`, `InvalidState`, `ValidationError`.
 - `domain/rules.py`: `normalize_word`, `caption_words`, `surname_norm(full_name, surname=None)`,
@@ -116,6 +116,19 @@
 - Пустой `BOT_TOKENS` → сервис стартует без поллинга (удобно для локальной разработки и тестов).
 - Приложение создаётся фабрикой `create_app(settings)`, модульного `app` нет (импорт не требует env);
   uvicorn запускается как `uvicorn --factory app.main:create_app`.
+- Окно смены сравнивается с точностью до минуты, обе границы включительно (окно 07:00–10:00 принимает 10:00:59).
+  Наивный `sent_at` считается UTC.
+- Слова подписи: буквы с дефисом внутри (двойные фамилии), цифры/эмодзи/пунктуация отбрасываются; сопоставление
+  только точное (склонения вроде «Мехоношина» не совпадают → `employee_not_found`).
+- `decide()` получает `EmployeeIndex` (только активные сотрудники). Привязка аккаунта к неактивному сотруднику
+  игнорируется, уволенный не матчится по подписи.
+- Правило альбома срабатывает только при пустой подписи и без привязки; альбом с нераспознанной подписью →
+  `manual_review/employee_not_found`. Пустая подпись = `None`, `""` или только пробелы.
+- Для `manual_review` `employee_id` не заполняется (сотрудника выбирает оператор в approve), `shift_date` — всегда.
+  `rejected/album_part_without_caption` тоже сохраняет `shift_date`; `unknown_group` и `outside_window` — нет.
+- Дополнительные причины сверх CLAUDE.md: `already_marked` (статус duplicate), `manual_approved`, `manual_rejected`,
+  `processing_error` (в `reason` пишется `processing_error: <текст исключения>`, поэтому `Message.reason` — строка).
+- Инварианты группы (start != end, существующая таймзона) проверяются в `Group.__post_init__` → `ValidationError`.
 - `TEST_DATABASE_URL` по умолчанию `postgresql+asyncpg://timesheet:timesheet@localhost:5432/timesheet_test`;
   БД `timesheet_test` создаётся init-скриптом `docker/initdb.sql` при первом старте volume.
 
@@ -149,3 +162,19 @@ NullPool), `tests/test_smoke.py`.
 (`docker compose ps`). Версии на момент установки: aiogram 3.31, fastapi 0.142, SQLAlchemy 2.1, pydantic 2.13,
 pytest-asyncio 1.4. `.env` создан из `.env.example` (в git не попадает). Фикстура `engine` — function-scoped с
 NullPool, чтобы не ловить проблемы event loop между тестами.
+
+### Шаг 2 — 2026-10-01
+Сделано: `app/domain/errors.py` (DomainError, NotFound, InvalidState, ValidationError), `app/domain/models.py`
+(Group/Employee/Binding/Message/Attendance/Decision, MessageStatus, Reason, EmployeeIndex), `app/domain/rules.py`
+(`normalize_word`, `caption_words`, `surname_norm`, `shift_date`, `message_link`, `decide`), `app/domain/ports.py`
+(Protocol репозиториев, UnitOfWork, UnitOfWorkFactory). Добавлена зависимость `tzdata` (для slim-образа).
+Тесты: 74 passed (`.venv/bin/pytest -q`): `tests/domain/test_rules.py` (нормализация, окно в сутках, через полночь
+с обеих сторон, TZ, валидация группы, ссылки), `tests/domain/test_decide.py` (пример из ТЗ + каждая ветка decide,
+пустая подпись, альбом, однофамильцы, неактивные), `tests/domain/test_purity.py` (AST-проверка: в домене нет
+sqlalchemy/aiogram/fastapi/openpyxl/pydantic; проверено, что тест ловит нарушение).
+Не сделано / долги: Protocol-ы в `ports.py` — черновые, на шаге 3–4 уточнить по факту (в т.ч. savepoint для изоляции
+ошибки одного сообщения). Расчёт дней месяца для табеля — на шаге 8.
+Заметки для следующего агента: `decide(message, group, EmployeeIndex.build(employees), bound_employee_id)` —
+сервис сам находит `bound_employee_id` по `message.tg_user_id` в привязках. `Message` — mutable dataclass (сервис
+проставляет результат и отдаёт в `save_result`), остальные сущности frozen. AttendanceRepository отдаёт отметки
+за период `list_between(start, end, chat_id)`, а не «за месяц» — месяц считает сервис табеля.
