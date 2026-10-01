@@ -91,10 +91,15 @@ class FakeMessageRepository:
     async def save_result(self, message: Message) -> None:
         self._state.messages[message.id] = copy.copy(message)
 
-    async def list(self, status: MessageStatus | None, limit: int, offset: int) -> list[Message]:
+    async def list(self, status: MessageStatus | None, limit: int, offset: int,
+                   employee_id: int | None = None, shift_date: date | None = None) -> list[Message]:
         items = sorted(self._state.messages.values(), key=lambda m: m.id, reverse=True)
         if status is not None:
             items = [m for m in items if m.status is status]
+        if employee_id is not None:
+            items = [m for m in items if m.employee_id == employee_id]
+        if shift_date is not None:
+            items = [m for m in items if m.shift_date == shift_date]
         return [copy.copy(m) for m in items[offset : offset + limit]]
 
 

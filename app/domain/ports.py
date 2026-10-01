@@ -22,8 +22,14 @@ class MessageRepository(Protocol):
         """Сохранить итог обработки: status, reason, employee_id, shift_date, processed_at."""
 
     async def list(
-        self, status: MessageStatus | None, limit: int, offset: int
-    ) -> list[Message]: ...
+        self,
+        status: MessageStatus | None,
+        limit: int,
+        offset: int,
+        employee_id: int | None = None,
+        shift_date: date | None = None,
+    ) -> list[Message]:
+        """Журнал, новые сверху; фильтры по статусу, сотруднику и дате смены."""
 
 
 class AttendanceRepository(Protocol):

@@ -77,7 +77,7 @@
 - Дубль отметки за один день.
 - Два параллельных воркера × 100 сообщений: каждое обработано ровно один раз, лишних отметок нет.
 
-### 6. [ ] HTTP API: справочники, журнал, health
+### 6. [x] HTTP API: справочники, журнал, health
 - `DirectoryService`; роутеры `groups` (POST upsert, GET; start==end → 422), `employees` (POST, GET),
   `bindings` (PUT /bindings/{tg_user_id}), `messages` (GET ?status&limit&offset, ссылка на первоисточник),
   `health`; зависимость `X-Admin-Token`; доменные исключения → HTTP-коды в одном месте.
@@ -146,6 +146,14 @@
   раннее сообщение). Без этого пачки с одними сотрудниками в разном порядке взаимно блокировались на уникальном
   индексе attendance, и Postgres обрывал одну транзакцию (`deadlock detected` → сообщение в `error`). Между пачками
   отметку получает та транзакция, что закоммитилась первой.
+- Журнал (`GET /messages`) живёт в `ReviewService` (экран оператора); отдельного сервиса под него нет.
+  Сверх CLAUDE.md добавлены фильтры `employee_id` и `shift_date` — «история по сотруднику и дате» из разд. 10 ТЗ.
+  Сортировка — новые сверху, `limit` 1..500 (по умолчанию 50).
+- HTTP-коды: нет/неверный `X-Admin-Token` → 401 (сравнение через `secrets.compare_digest`); `NotFound` → 404,
+  `InvalidState` → 409, доменная `ValidationError` → 422 (как и ошибки pydantic). `POST /groups` (upsert) → 200,
+  `POST /employees` → 201. `/health` — liveness без проверки БД.
+- `full_name` сотрудника нормализуется по пробелам; ФИО без букв → 422. Сотрудники только создаются (деактивация и
+  правка — вне скоупа v1, поле `active` есть в модели).
 - `TEST_DATABASE_URL` по умолчанию `postgresql+asyncpg://timesheet:timesheet@localhost:5432/timesheet_test`;
   БД `timesheet_test` создаётся init-скриптом `docker/initdb.sql` при первом старте volume.
 
@@ -249,3 +257,22 @@ abort-ит транзакцию пачки). Мутационная провер
 Не сделано / долги: нет.
 Заметки для следующего агента: фикстура `engine` использует NullPool — каждый UoW открывает своё соединение, поэтому
 «параллельные воркеры» в одном event loop действительно работают в разных транзакциях Postgres.
+
+### Шаг 6 — 2026-10-01
+Сделано: `services/directory.py` (upsert_group, list_groups, add_employee, list_employees, bind с проверкой
+сотрудника), `services/review.py` (пока только `list_messages`; approve/reject — шаг 7). Фильтры `employee_id`,
+`shift_date` в `MessageRepository.list` (Protocol, SQL, фейк). HTTP-слой `app/handlers/http/`: `schemas.py`
+(pydantic In/Out, `MessageOut.link` через `domain.rules.message_link`), `deps.py` (`require_admin`, `Directory`,
+`Review` из `app.state.services`), `errors.py` (единая трансляция DomainError → код), роутеры `groups`,
+`employees`, `bindings`, `messages`, `health`; `register_http(app)` вешает admin-зависимость на всё, кроме /health.
+`main.py`: `Services` расширен, `app.state.settings` выставляется в `create_app`.
+Тесты: 143 passed. `tests/http/` (httpx + ASGITransport на реальных сервисах и тестовой БД, lifespan с
+`workers=0`): авторизация, группы (создание, upsert, 4 вида ошибок валидации), сотрудники, привязки (перепривязка,
+404), журнал (ссылка на первоисточник, фильтр по статусу, пагинация, история по сотруднику и дате, валидация
+параметров). `tests/services/test_directory.py` на фейках. `tests/domain/test_purity.py` заменён на
+`tests/test_layers.py` — AST-проверка правил слоёв для domain/services/repositories (проверено, что ловит нарушение).
+Проверено вручную: `/openapi.json` генерируется, все пути на месте.
+Не сделано / долги: нет.
+Заметки для следующего агента: в FastAPI 0.142 `app.routes` содержит `_IncludedRouter` вместо APIRoute — для
+проверки маршрутов смотри `/openapi.json`. HTTP-тесты сами разбирают очередь через
+`app.state.services.processing.process_batch()` (воркеров нет), сообщения кладут через `services.ingest`.

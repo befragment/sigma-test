@@ -13,12 +13,15 @@ from fastapi import FastAPI
 
 from app.config import Settings
 from app.db import create_engine, create_session_factory
+from app.handlers.http import register_http
 from app.handlers.telegram import create_dispatcher
 from app.handlers.worker import run_worker
 from app.repositories.orm import create_schema
 from app.repositories.uow import SqlAlchemyUnitOfWork
+from app.services.directory import DirectoryService
 from app.services.ingest import IngestService
 from app.services.processing import ProcessingService
+from app.services.review import ReviewService
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +30,8 @@ logger = logging.getLogger(__name__)
 class Services:
     ingest: IngestService
     processing: ProcessingService
+    directory: DirectoryService
+    review: ReviewService
 
 
 def _log_crash(task: asyncio.Task) -> None:
@@ -49,6 +54,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         services = Services(
             ingest=IngestService(uow_factory),
             processing=ProcessingService(uow_factory, settings.batch_size),
+            directory=DirectoryService(uow_factory),
+            review=ReviewService(uow_factory),
         )
         app.state.services = services
 
@@ -87,4 +94,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             await asyncio.gather(*workers, return_exceptions=True)
             await engine.dispose()
 
-    return FastAPI(title="Shift timesheet", lifespan=lifespan)
+    app = FastAPI(title="Shift timesheet", lifespan=lifespan)
+    app.state.settings = settings
+    register_http(app)
+    return app

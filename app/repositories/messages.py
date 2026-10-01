@@ -1,3 +1,5 @@
+from datetime import date
+
 from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -81,9 +83,18 @@ class SqlMessageRepository:
         )
 
     async def list(
-        self, status: MessageStatus | None, limit: int, offset: int
+        self,
+        status: MessageStatus | None,
+        limit: int,
+        offset: int,
+        employee_id: int | None = None,
+        shift_date: date | None = None,
     ) -> list[Message]:
         stmt = select(MessageRow).order_by(MessageRow.id.desc()).limit(limit).offset(offset)
         if status is not None:
             stmt = stmt.where(MessageRow.status == status.value)
+        if employee_id is not None:
+            stmt = stmt.where(MessageRow.employee_id == employee_id)
+        if shift_date is not None:
+            stmt = stmt.where(MessageRow.shift_date == shift_date)
         return [_to_domain(row) for row in await self._session.scalars(stmt)]
