@@ -58,7 +58,7 @@ async def test_group_filter(app, client):
     ws = sheet(response)
     assert ws["B1"].value == "Табель за сентябрь 2025 — Пост 2"
     assert (ws["A3"].value, ws["U3"].value, ws["A4"].value) == ("Петров Сергей", 1, "ИТОГ:")
-    assert response.headers["content-disposition"].endswith(f'timesheet-2025-09-{OTHER_CHAT_ID}.xlsx"')
+    assert response.headers["content-disposition"] == 'attachment; filename="timesheet-2025-09-group1009876543210.xlsx"'
 
 
 @pytest.mark.parametrize(

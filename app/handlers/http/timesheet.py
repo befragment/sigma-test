@@ -21,7 +21,8 @@ async def get_timesheet(
     chat_id: int | None = None,
 ) -> Response:
     content = await timesheets.get_xlsx(month, chat_id)
-    filename = f"timesheet-{month}" + (f"-{chat_id}" if chat_id is not None else "") + ".xlsx"
+    # chat_id групп отрицательный: в имя файла идёт модуль, чтобы не было «--».
+    filename = f"timesheet-{month}" + (f"-group{abs(chat_id)}" if chat_id is not None else "") + ".xlsx"
     return Response(
         content, media_type=XLSX, headers={"Content-Disposition": f'attachment; filename="{filename}"'}
     )
