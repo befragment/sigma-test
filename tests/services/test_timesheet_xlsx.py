@@ -53,6 +53,16 @@ def test_formulas():
     assert ws.max_row == 5
 
 
+def test_recalculated_on_open():
+    workbook = load_workbook(BytesIO(build_xlsx(SEPTEMBER)))
+    assert workbook.calculation.fullCalcOnLoad is True
+
+
+def test_name_column_fits_longest_name():
+    ws = render(Timesheet(2025, 9, "t", (TimesheetRow("Мехоношин Алексей Петрович", frozenset()),)))
+    assert ws.column_dimensions["A"].width >= len("Мехоношин Алексей Петрович") * 1.3
+
+
 def test_arial_everywhere():
     ws = render(SEPTEMBER)
     fonts = {cell.font.name for row in ws.iter_rows() for cell in row if cell.value is not None}

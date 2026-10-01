@@ -84,12 +84,17 @@ def build_xlsx(timesheet: Timesheet) -> bytes:
         for r in range(HEADER_ROW, total_row + 1):
             ws.cell(row=r, column=FIRST_DAY_COL + day - 1).fill = _MISSING_DAY_FILL
 
-    ws.column_dimensions["A"].width = max([20.57, *(len(row.full_name) + 2 for row in timesheet.rows)])
+    # Ширина в Excel меряется символами шрифта по умолчанию; Arial 12 примерно на треть шире.
+    ws.column_dimensions["A"].width = max([20.57, *(len(row.full_name) * 1.3 + 2 for row in timesheet.rows)])
     for col in range(FIRST_DAY_COL, TOTAL_COL):
         ws.column_dimensions[get_column_letter(col)].width = 4.71
     ws.column_dimensions[total_col].width = 9.14
     ws.row_dimensions[HEADER_ROW].height = 30
     ws.freeze_panes = ws.cell(row=FIRST_ROW, column=FIRST_DAY_COL)
+
+    # openpyxl не сохраняет вычисленные значения формул: Excel/LibreOffice пересчитают их при открытии
+    # (флаг и так включён по умолчанию, ставим явно). Превью без пересчёта (Quick Look и т.п.) покажут 0.
+    wb.calculation.fullCalcOnLoad = True
 
     buffer = BytesIO()
     wb.save(buffer)
