@@ -98,7 +98,7 @@
 - Проверить `docker compose up` вживую (health, curl-сценарий из README).
 - README на русском — все пункты из раздела «README» CLAUDE.md.
 
-### 10. [ ] Финальная проверка
+### 10. [x] Финальная проверка
 - Полный прогон тестов; grep-проверка правил слоёв (sqlalchemy только в repositories/db/config; aiogram/fastapi
   только в handlers/main); удалить мусор; сверить README с фактическим поведением.
 
@@ -340,3 +340,20 @@ duplicate, manual_review/ambiguous_surname, accepted/by_account, rejected/outsid
 Не сделано / долги: нет.
 Заметки для следующего агента: Postgres из compose запущен, app остановлен. В БД `timesheet` остались демо-данные
 ручной проверки (3 сотрудника, 6 сообщений) — для чистого старта `docker compose down -v`.
+
+### Шаг 10 — 2026-10-01
+Сделано / проверено:
+- `ruff check app tests --select F,E9,B,UP,SIM` (ruff во временном venv, в зависимости проекта не добавлен) — чисто.
+- grep правил слоёв: sqlalchemy — только `repositories/*` и `db.py`; aiogram — `handlers/telegram.py`, `main.py`;
+  fastapi — `handlers/http/*`, `main.py`; openpyxl — только билдер `services/timesheet_xlsx.py`; SQL-текста вне
+  репозиториев нет; сессии создаются только в composition root. Плюс автотест `tests/test_layers.py`.
+- Сигнатуры всех Protocol из `domain/ports.py` совпадают с SQL-реализациями и фейками (скрипт через `inspect`).
+- Запуск с нуля как у проверяющего: отдельный compose-проект `sigma-fresh` на пустом volume → `up -d --build`
+  поднимает обе службы, init-скрипт создаёт `timesheet_test`, схема создаётся при старте; 208 тестов зелёные на
+  свежей БД; curl-блок из README выполнен дословно — все ручки отвечают ожидаемо (approve/reject примера → 404, т.к.
+  без бота сообщений нет — в README уточнено, что id берётся из `GET /review`). Проверочный стек удалён с volume,
+  основной Postgres восстановлен, данные в `sigma-test_pgdata` не тронуты.
+Тесты: 208 passed.
+Итог по плану: все 10 шагов выполнены. Открытые ограничения перечислены в README («Надёжность приёма», «Что
+осознанно не сделано»): потеря события при простое БД > ~2 мин (решение — webhook), один невалидный токен
+останавливает поллинг всех ботов процесса, нет ручного переопределения rejected/error.

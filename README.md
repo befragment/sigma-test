@@ -76,7 +76,7 @@ curl -X PUT localhost:8000/bindings/555000111 -H "$H" -H "$J" -d '{"employee_id"
 curl "localhost:8000/messages?status=accepted&limit=20" -H "$H"
 curl "localhost:8000/messages?employee_id=1&shift_date=2025-09-19" -H "$H"   # история по сотруднику и дате
 
-# Ручная проверка
+# Ручная проверка: id сообщения — поле "id" из GET /review (не message_id из Telegram)
 curl localhost:8000/review -H "$H"
 curl -X POST localhost:8000/review/3/approve -H "$H" -H "$J" -d '{"employee_id": 2}'   # shift_date — опционально
 curl -X POST localhost:8000/review/4/reject -H "$H"
