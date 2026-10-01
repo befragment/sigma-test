@@ -67,7 +67,7 @@
 - Интеграционный тест: ingest → process_batch → строка в attendance, message.status=accepted.
 - **Готово, когда:** тест зелёный на реальном Postgres.
 
-### 4. [ ] Устойчивость обработки + тесты сервисов на фейках
+### 4. [x] Устойчивость обработки + тесты сервисов на фейках
 - Ошибка одного сообщения не роняет пачку: savepoint на сообщение, статус `error`, reason = текст ошибки.
 - Дубль за день → `duplicate`; manual_review сохраняет shift_date.
 - `tests/fakes.py`: in-memory репозитории и FakeUoW; `tests/services/`: оркестрация, ошибка одного сообщения, дубли.
@@ -137,6 +137,10 @@
 - Справочники (группы, привязки, сотрудники) воркер читает целиком на каждую пачку.
 - Поллинг: `allowed_updates=["message"]` (правки сообщений не нужны), `handle_signals=False` (сигналы обрабатывает
   uvicorn). Остановка: `stop_polling()` → дождаться поллинга → отменить воркеры → `engine.dispose()`.
+- Ошибка одного сообщения: его изменения откатываются savepoint-ом, статус `error`, `reason =
+  "processing_error: <Класс>: <текст>"` (до 1000 символов), employee_id/shift_date очищаются. Повторно такие сообщения
+  автоматически не обрабатываются (не зацикливаемся на «ядовитых»); вернуть в очередь — вручную (вне скоупа v1).
+- Сбой всей пачки (например, потеря соединения) — откат, сообщения остаются `new`, воркер повторит.
 - `TEST_DATABASE_URL` по умолчанию `postgresql+asyncpg://timesheet:timesheet@localhost:5432/timesheet_test`;
   БД `timesheet_test` создаётся init-скриптом `docker/initdb.sql` при первом старте volume.
 
@@ -208,3 +212,19 @@ F.photo в group/supergroup → IngestService), `handlers/worker.py` (`run_worke
 Заметки для следующего агента: репозитории справочников лежат в одном `repositories/directory.py` (три класса).
 Для тестов приложения: `Settings(_env_file=None, ...)`, чтобы не подхватывать локальный `.env`; lifespan запускается
 через `app.router.lifespan_context(app)`. Postgres из compose продолжает работать.
+
+### Шаг 4 — 2026-10-01
+Сделано: `UnitOfWork.savepoint()` (Protocol + `session.begin_nested()` в SqlAlchemyUnitOfWork);
+`ProcessingService` обрабатывает каждое сообщение в своём savepoint, при исключении пишет статус `error` с текстом
+ошибки и продолжает пачку. `tests/fakes.py`: FakeDB + in-memory репозитории + FakeUnitOfWork (транзакции через
+снимки состояния, savepoint откатывает свои изменения), точки внедрения сбоев (`fail_ingests`,
+`fail_attendance_for`, `fail_groups_list`).
+Тесты: 92 passed. `tests/services/test_processing.py` (отметка, привязка, дубль в одной пачке и между пачками,
+повторно не берётся, manual_review с датой без отметки, unknown_group, ошибка одного сообщения с откатом частичной
+записи, сбой пачки → всё остаётся new, размер пачки и порядок по id), `tests/services/test_ingest.py` (new,
+повторная доставка, повторы до восстановления, отказ после всех попыток),
+`tests/integration/test_processing_errors.py` (на Postgres: `SELECT 1/0` внутри обработки одного сообщения не
+abort-ит транзакцию пачки). Мутационная проверка: без savepoint падают оба теста на изоляцию ошибки.
+Не сделано / долги: нет ручки «вернуть error в очередь» (осознанно, в README). Тест параллельных воркеров — шаг 5.
+Заметки для следующего агента: в фейках `put()`/`db.add_employee()` пишут сразу в «закоммиченное» состояние;
+сервис работает через `db.uow` (фабрика). Порядок полей у `Message` позиционный: chat_id, message_id, sent_at.

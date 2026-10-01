@@ -8,6 +8,8 @@ from app.domain.rules import decide
 
 logger = logging.getLogger(__name__)
 
+MAX_REASON = 1000
+
 
 class ProcessingService:
     """Обработка очереди: пачка new → решение → отметка в табеле и итоговый статус в одной транзакции."""
@@ -34,9 +36,14 @@ class ProcessingService:
             employees = EmployeeIndex.build(await uow.employees.list())
 
             for message in messages:
-                bound = bindings.get(message.tg_user_id)
-                decision = decide(message, groups.get(message.chat_id), employees, bound)
-                await self._apply(uow, message, decision)
+                try:
+                    async with uow.savepoint():
+                        bound = bindings.get(message.tg_user_id)
+                        decision = decide(message, groups.get(message.chat_id), employees, bound)
+                        await self._apply(uow, message, decision)
+                except Exception as exc:  # noqa: BLE001 — ошибка одного сообщения не роняет пачку
+                    logger.exception("failed to process message id=%s", message.id)
+                    await self._fail(uow, message, exc)
 
             await uow.commit()
         logger.info("processed %d messages", len(messages))
@@ -59,5 +66,13 @@ class ProcessingService:
         message.reason = reason.value
         message.employee_id = decision.employee_id
         message.shift_date = decision.shift_date
+        message.processed_at = self._clock()
+        await uow.messages.save_result(message)
+
+    async def _fail(self, uow: UnitOfWork, message: Message, exc: Exception) -> None:
+        message.status = MessageStatus.ERROR
+        message.reason = f"{Reason.PROCESSING_ERROR.value}: {type(exc).__name__}: {exc}"[:MAX_REASON]
+        message.employee_id = None
+        message.shift_date = None
         message.processed_at = self._clock()
         await uow.messages.save_result(message)

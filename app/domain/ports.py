@@ -1,5 +1,6 @@
 """Интерфейсы хранилища, от которых зависят сервисы. Реализации — в app.repositories."""
 
+from contextlib import AbstractAsyncContextManager
 from datetime import date
 from types import TracebackType
 from typing import Protocol, Self
@@ -76,6 +77,9 @@ class UnitOfWork(Protocol):
     async def commit(self) -> None: ...
 
     async def rollback(self) -> None: ...
+
+    def savepoint(self) -> AbstractAsyncContextManager[None]:
+        """Вложенная транзакция: исключение внутри откатывает только её изменения."""
 
 
 class UnitOfWorkFactory(Protocol):

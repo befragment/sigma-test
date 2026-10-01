@@ -1,3 +1,5 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from types import TracebackType
 from typing import Self
 
@@ -41,3 +43,9 @@ class SqlAlchemyUnitOfWork:
 
     async def rollback(self) -> None:
         await self._session.rollback()
+
+    @asynccontextmanager
+    async def savepoint(self) -> AsyncIterator[None]:
+        """Вложенная транзакция: при исключении откатывается только она, внешняя остаётся рабочей."""
+        async with self._session.begin_nested():
+            yield
