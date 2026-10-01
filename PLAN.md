@@ -83,7 +83,7 @@
   `health`; зависимость `X-Admin-Token`; доменные исключения → HTTP-коды в одном месте.
 - Тесты через httpx на реальных сервисах и тестовой БД.
 
-### 7. [ ] Ручная проверка (review)
+### 7. [x] Ручная проверка (review)
 - `ReviewService`: list, approve(id, employee_id, shift_date?) → attendance manual=true или `duplicate` при конфликте,
   reject → `rejected/manual_rejected`. Approve/reject только из `manual_review`, иначе `InvalidState` → 409.
 - Роутер `review`; тесты на фейках и HTTP-тест approve.
@@ -154,6 +154,13 @@
   `POST /employees` → 201. `/health` — liveness без проверки БД.
 - `full_name` сотрудника нормализуется по пробелам; ФИО без букв → 422. Сотрудники только создаются (деактивация и
   правка — вне скоупа v1, поле `active` есть в модели).
+- Approve/reject — только из `manual_review` (иначе 409). Переопределить `rejected` (например, `outside_window` —
+  поздний выход) или `error` вручную нельзя — вне скоупа v1. Строка сообщения блокируется (`get_for_update`), поэтому
+  одновременные решения двух операторов не проходят оба.
+- Approve: `shift_date` из запроса или рассчитанная; неактивный сотрудник → 422; отметка `manual=true`, ссылается
+  на это же сообщение; при существующей отметке → `duplicate/already_marked`. Reject → `rejected/manual_rejected`,
+  рассчитанная `shift_date` остаётся в журнале. Кто принял решение — не хранится (один админ-токен, ролей нет).
+- `GET /review` — как журнал: новые сверху, `limit`/`offset`.
 - `TEST_DATABASE_URL` по умолчанию `postgresql+asyncpg://timesheet:timesheet@localhost:5432/timesheet_test`;
   БД `timesheet_test` создаётся init-скриптом `docker/initdb.sql` при первом старте volume.
 
@@ -276,3 +283,15 @@ abort-ит транзакцию пачки). Мутационная провер
 Заметки для следующего агента: в FastAPI 0.142 `app.routes` содержит `_IncludedRouter` вместо APIRoute — для
 проверки маршрутов смотри `/openapi.json`. HTTP-тесты сами разбирают очередь через
 `app.state.services.processing.process_batch()` (воркеров нет), сообщения кладут через `services.ingest`.
+
+### Шаг 7 — 2026-10-01
+Сделано: `ReviewService` — `list_review`, `approve(id, employee_id, shift_date?)`, `reject(id)` (общая проверка
+статуса с блокировкой строки в `_take_for_review`, внедряемые часы). HTTP `app/handlers/http/review.py`:
+`GET /review`, `POST /review/{id}/approve` (`ApproveIn`), `POST /review/{id}/reject`.
+Тесты: 169 passed. `tests/services/test_review.py` (фейки: список, approve с отметкой manual, явная дата, дубль,
+нет даты, 5 недопустимых статусов, неизвестные сообщение/сотрудник, неактивный сотрудник, reject, повторное
+решение), `tests/http/test_review.py` (список со ссылкой, approve → отметка manual в БД, дубль, явная дата, reject,
+409/404, 422, токен), `tests/integration/test_review.py` (два approve и reject одновременно → проходит ровно одно).
+Мутационная проверка: без `FOR UPDATE` в `get_for_update` проходят все три решения — тест падает.
+Не сделано / долги: нет.
+Заметки для следующего агента: отметки в HTTP-тестах проверяются через фикстуру `uow_factory` (та же тестовая БД).

@@ -53,6 +53,13 @@ class BindingOut(BaseModel):
     employee_id: int
 
 
+class ApproveIn(BaseModel):
+    employee_id: int
+    shift_date: date | None = Field(
+        default=None, description="Если не задана — рассчитанная по окну группы дата смены"
+    )
+
+
 class MessageOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
