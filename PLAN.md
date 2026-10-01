@@ -34,7 +34,7 @@
 
 ## Шаги
 
-### 1. [ ] Каркас проекта и инфраструктура
+### 1. [x] Каркас проекта и инфраструктура
 - `pyproject.toml` (Python 3.12; зависимости: fastapi, uvicorn, aiogram 3, sqlalchemy[asyncio] 2, asyncpg,
   pydantic-settings, openpyxl; dev: pytest, pytest-asyncio, httpx).
 - `app/config.py` (Settings: `DATABASE_URL`, `BOT_TOKENS` (через запятую, может быть пустым → бот не запускается),
@@ -114,12 +114,16 @@
 - Обрабатываются только `photo`; изображение, отправленное файлом (document), не считается (вне скоупа v1).
 - Справочники (группы/сотрудники/привязки) воркер читает на каждую пачку — для v1 достаточно, кэш вне скоупа.
 - Пустой `BOT_TOKENS` → сервис стартует без поллинга (удобно для локальной разработки и тестов).
+- Приложение создаётся фабрикой `create_app(settings)`, модульного `app` нет (импорт не требует env);
+  uvicorn запускается как `uvicorn --factory app.main:create_app`.
+- `TEST_DATABASE_URL` по умолчанию `postgresql+asyncpg://timesheet:timesheet@localhost:5432/timesheet_test`;
+  БД `timesheet_test` создаётся init-скриптом `docker/initdb.sql` при первом старте volume.
 
 ---
 
 ## Журнал
 
-_Пока пусто. Формат записи:_
+_Формат записи:_
 
 ```
 ### Шаг N — YYYY-MM-DD
@@ -128,3 +132,20 @@ _Пока пусто. Формат записи:_
 Не сделано / долги: ...
 Заметки для следующего агента: ...
 ```
+
+### Шаг 1 — 2026-10-01
+Сделано: `pyproject.toml` (зависимости + dev, настройки pytest: `asyncio_mode=auto`), `app/config.py` (Settings,
+`BOT_TOKENS` через запятую → список), `app/db.py` (engine, session factory), минимальный `app/main.py`
+(`create_app` + lifespan с engine), пустые пакеты слоёв, `Dockerfile`, `docker-compose.yml` (postgres:16-alpine с
+healthcheck и пробросом 5432, app с `depends_on: service_healthy`), `docker/initdb.sql`, `.env.example`,
+`.dockerignore`, `docs/task.xlsx`, `tests/conftest.py` (фикстуры `database_url` — skip при недоступной БД, `engine` с
+NullPool), `tests/test_smoke.py`.
+Тесты: 3 passed (`.venv/bin/pytest -q`); без Postgres — 2 passed, 1 skipped.
+Проверено вручную: `docker compose up -d --wait postgres` → healthy, БД `timesheet_test` есть;
+`docker compose up --build app` → образ собирается, uvicorn стартует, `/docs` отдаёт 200.
+Не сделано / долги: `/health` и сборка зависимостей — на шагах 3 и 6. `handlers/telegram.py` и `handlers/worker.py`
+будут модулями (создаются на шаге 3), `handlers/http/` — пакет под роутеры.
+Заметки для следующего агента: venv — `.venv` (Python 3.12, Homebrew). Postgres оставлен запущенным
+(`docker compose ps`). Версии на момент установки: aiogram 3.31, fastapi 0.142, SQLAlchemy 2.1, pydantic 2.13,
+pytest-asyncio 1.4. `.env` создан из `.env.example` (в git не попадает). Фикстура `engine` — function-scoped с
+NullPool, чтобы не ловить проблемы event loop между тестами.
