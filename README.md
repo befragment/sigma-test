@@ -8,7 +8,8 @@
 
 Бот в чате ничего не пишет: результаты обработки, ручная проверка и табель доступны только через HTTP API.
 
-Проверка на реальных ботах и группе Telegram — в [отчёте](docs/telegram-test-report.md).
+Краткий отчёт о выполнении задания — [REPORT.md](REPORT.md); проверка на реальных ботах и группе Telegram —
+в [отчёте о тестировании](docs/telegram-test-report.md).
 
 Стек: Python 3.12, FastAPI, aiogram 3 (long polling), PostgreSQL, SQLAlchemy 2 (async) + asyncpg, openpyxl.
 Один процесс: lifespan FastAPI запускает поллинг ботов и N воркеров обработки как фоновые asyncio-задачи.
