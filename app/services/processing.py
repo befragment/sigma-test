@@ -1,6 +1,6 @@
 import logging
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 from app.domain.models import Attendance, Decision, EmployeeIndex, Message, MessageStatus, Reason
 from app.domain.ports import UnitOfWork, UnitOfWorkFactory
@@ -9,6 +9,12 @@ from app.domain.rules import decide
 logger = logging.getLogger(__name__)
 
 MAX_REASON = 1000
+
+
+def _lock_order(decision: Decision) -> tuple[bool, int, date]:
+    if decision.status is MessageStatus.ACCEPTED:
+        return (False, decision.employee_id, decision.shift_date)
+    return (True, 0, date.min)
 
 
 class ProcessingService:
@@ -35,11 +41,24 @@ class ProcessingService:
             bindings = {b.tg_user_id: b.employee_id for b in await uow.bindings.list()}
             employees = EmployeeIndex.build(await uow.employees.list())
 
+            decided: list[tuple[Message, Decision]] = []
             for message in messages:
                 try:
+                    bound = bindings.get(message.tg_user_id)
+                    decision = decide(message, groups.get(message.chat_id), employees, bound)
+                except Exception as exc:  # noqa: BLE001 — ошибка одного сообщения не роняет пачку
+                    logger.exception("failed to decide message id=%s", message.id)
+                    await self._fail(uow, message, exc)
+                else:
+                    decided.append((message, decision))
+
+            # Отметки ставятся в едином порядке (employee_id, shift_date): все воркеры берут ключи
+            # уникального индекса attendance в одном порядке, поэтому взаимоблокировок между пачками нет.
+            # Сортировка стабильная — внутри пачки отметку получает более раннее сообщение.
+            decided.sort(key=lambda item: _lock_order(item[1]))
+            for message, decision in decided:
+                try:
                     async with uow.savepoint():
-                        bound = bindings.get(message.tg_user_id)
-                        decision = decide(message, groups.get(message.chat_id), employees, bound)
                         await self._apply(uow, message, decision)
                 except Exception as exc:  # noqa: BLE001 — ошибка одного сообщения не роняет пачку
                     logger.exception("failed to process message id=%s", message.id)
