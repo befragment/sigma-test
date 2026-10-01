@@ -55,7 +55,7 @@
 - Тесты `tests/domain/`: все пункты из раздела «Тесты» CLAUDE.md + пример «Мехоношин 08:50 МСК».
 - **Готово, когда:** все ветки decide покрыты, в `app/domain` нет импортов sqlalchemy/aiogram/fastapi/openpyxl.
 
-### 3. [ ] Сквозной путь на одном кейсе (фото с фамилией → 1 в attendance)
+### 3. [x] Сквозной путь на одном кейсе (фото с фамилией → 1 в attendance)
 - `repositories/orm.py` (таблицы из «Модели данных», `UNIQUE(chat_id,message_id)`, частичный индекс
   `WHERE status='new'`, `UNIQUE(employee_id, shift_date)`), маппинг ORM ↔ домен.
 - `MessageRepository` (add_if_absent, take_new_batch FOR UPDATE SKIP LOCKED, save_decision),
@@ -129,6 +129,14 @@
 - Дополнительные причины сверх CLAUDE.md: `already_marked` (статус duplicate), `manual_approved`, `manual_rejected`,
   `processing_error` (в `reason` пишется `processing_error: <текст исключения>`, поэтому `Message.reason` — строка).
 - Инварианты группы (start != end, существующая таймзона) проверяются в `Group.__post_init__` → `ValidationError`.
+- aiogram подтверждает апдейт (offset) до завершения хендлера, поэтому исключение в хендлере = потеря события.
+  `IngestService` повторяет сохранение с паузами 0.5…60 с (~2 мин суммарно, хендлеры идут как отдельные задачи и не
+  блокируют поллинг); после исчерпания попыток сообщение целиком пишется в лог ERROR. Остаточный риск (БД лежит
+  дольше 2 мин или процесс упал во время повторов) — в README.
+- Воркер при сбое пачки логирует и спит `POLL_INTERVAL`; транзакция пачки откатывается, сообщения остаются `new`.
+- Справочники (группы, привязки, сотрудники) воркер читает целиком на каждую пачку.
+- Поллинг: `allowed_updates=["message"]` (правки сообщений не нужны), `handle_signals=False` (сигналы обрабатывает
+  uvicorn). Остановка: `stop_polling()` → дождаться поллинга → отменить воркеры → `engine.dispose()`.
 - `TEST_DATABASE_URL` по умолчанию `postgresql+asyncpg://timesheet:timesheet@localhost:5432/timesheet_test`;
   БД `timesheet_test` создаётся init-скриптом `docker/initdb.sql` при первом старте volume.
 
@@ -178,3 +186,25 @@ sqlalchemy/aiogram/fastapi/openpyxl/pydantic; проверено, что тес�
 сервис сам находит `bound_employee_id` по `message.tg_user_id` в привязках. `Message` — mutable dataclass (сервис
 проставляет результат и отдаёт в `save_result`), остальные сущности frozen. AttendanceRepository отдаёт отметки
 за период `list_between(start, end, chat_id)`, а не «за месяц» — месяц считает сервис табеля.
+
+### Шаг 3 — 2026-10-01
+Сделано: `app/repositories/orm.py` (5 таблиц, `uq_messages_chat_message`, частичный `ix_messages_new WHERE
+status='new'`, `ix_messages_status_id`, `uq_attendance_employee_date`, `create_schema`), `messages.py`
+(add_if_absent через ON CONFLICT DO NOTHING RETURNING, take_new_batch FOR UPDATE SKIP LOCKED, get_for_update,
+save_result, list), `attendance.py` (add_if_absent, list_between с фильтром по chat_id через join messages),
+`directory.py` (группы upsert/list, сотрудники add/get/list, привязки set (upsert)/list), `uow.py`
+(SqlAlchemyUnitOfWork). Сервисы `services/ingest.py` (с повторами), `services/processing.py` (decide + отметка +
+статус в одной транзакции, duplicate при конфликте). Хендлеры `handlers/telegram.py` (`create_dispatcher`: только
+F.photo в group/supergroup → IngestService), `handlers/worker.py` (`run_worker`). `main.py`: `Services` в
+`app.state.services`, lifespan: create_schema → N воркеров → поллинг всех ботов одним Dispatcher.
+Тесты: 77 passed. `tests/integration/test_pipeline.py`: ingest → process_batch → строка в attendance (пример
+«Мехоношин» 08:50 МСК → 19.09), пустая очередь, lifespan с 2 воркерами сам разбирает очередь. `conftest.py`:
+схема пересоздаётся один раз за прогон, перед каждым тестом TRUNCATE ... RESTART IDENTITY; фикстура `uow_factory`.
+Проверено вручную: индексы в БД соответствуют плану; `docker compose up --build app` стартует; с невалидным
+токеном ошибка `TelegramUnauthorizedError` логируется, сервис продолжает работать и корректно останавливается.
+Не сделано / долги: ошибка одного сообщения пока роняет всю пачку (шаг 4 — savepoint). Тест повторов IngestService —
+шаг 4 на фейках. Один невалидный токен в `BOT_TOKENS` останавливает поллинг всех ботов (aiogram делает get_me для
+всех сразу) — описать в README или запускать поллинг по боту отдельно. HTTP-ручки и /health — шаг 6.
+Заметки для следующего агента: репозитории справочников лежат в одном `repositories/directory.py` (три класса).
+Для тестов приложения: `Settings(_env_file=None, ...)`, чтобы не подхватывать локальный `.env`; lifespan запускается
+через `app.router.lifespan_context(app)`. Postgres из compose продолжает работать.
