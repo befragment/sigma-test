@@ -1,3 +1,4 @@
+import calendar
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import date, datetime, time
@@ -133,3 +134,21 @@ class EmployeeIndex:
             by_surname={surname: tuple(ids) for surname, ids in by_surname.items()},
             active_ids=frozenset(active_ids),
         )
+
+
+@dataclass(frozen=True)
+class TimesheetRow:
+    full_name: str
+    days: frozenset[int]  # дни месяца с отметкой
+
+
+@dataclass(frozen=True)
+class Timesheet:
+    year: int
+    month: int
+    title: str
+    rows: tuple[TimesheetRow, ...]
+
+    @property
+    def days_in_month(self) -> int:
+        return calendar.monthrange(self.year, self.month)[1]

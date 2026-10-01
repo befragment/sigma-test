@@ -1,9 +1,22 @@
+import calendar
 import re
+from collections.abc import Iterable
 from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from app.domain.errors import ValidationError
-from app.domain.models import Decision, EmployeeIndex, Group, Message, MessageStatus, Reason
+from app.domain.models import (
+    Attendance,
+    Decision,
+    Employee,
+    EmployeeIndex,
+    Group,
+    Message,
+    MessageStatus,
+    Reason,
+    Timesheet,
+    TimesheetRow,
+)
 
 # Слово — буквы, допускается дефис внутри (двойные фамилии). Цифры, эмодзи и пунктуация отбрасываются.
 _WORD_RE = re.compile(r"[^\W\d_]+(?:-[^\W\d_]+)*")
@@ -107,3 +120,54 @@ def decide(
     if message.media_group_id:
         return Decision(MessageStatus.REJECTED, Reason.ALBUM_PART_WITHOUT_CAPTION, None, day)
     return review(Reason.NO_CAPTION)
+
+
+_MONTH_RE = re.compile(r"(\d{4})-(\d{2})")
+_MONTH_NAMES = (
+    "январь", "февраль", "март", "апрель", "май", "июнь",
+    "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь",
+)
+
+
+def parse_month(value: str) -> tuple[int, int]:
+    """«YYYY-MM» → (год, месяц)."""
+    match = _MONTH_RE.fullmatch(value)
+    if not match or not 1 <= int(match.group(2)) <= 12:
+        raise ValidationError(f"месяц должен быть в формате YYYY-MM: {value!r}")
+    return int(match.group(1)), int(match.group(2))
+
+
+def month_bounds(year: int, month: int) -> tuple[date, date]:
+    return date(year, month, 1), date(year, month, calendar.monthrange(year, month)[1])
+
+
+def build_timesheet(
+    year: int,
+    month: int,
+    employees: Iterable[Employee],
+    marks: Iterable[Attendance],
+    *,
+    only_marked: bool,
+    group_title: str | None = None,
+) -> Timesheet:
+    """Строки табеля за месяц, по алфавиту ФИО.
+
+    only_marked=False — все активные сотрудники плюс те, у кого есть отметки (в т.ч. уже неактивные);
+    only_marked=True — только сотрудники с отметками (табель по одной группе).
+    """
+    days: dict[int, set[int]] = {}
+    for mark in marks:
+        if (mark.shift_date.year, mark.shift_date.month) == (year, month):
+            days.setdefault(mark.employee_id, set()).add(mark.shift_date.day)
+
+    rows = [
+        TimesheetRow(employee.full_name, frozenset(days.get(employee.id, ())))
+        for employee in employees
+        if employee.id in days or (employee.active and not only_marked)
+    ]
+    rows.sort(key=lambda row: normalize_word(row.full_name))
+
+    title = f"Табель за {_MONTH_NAMES[month - 1]} {year}"
+    if group_title:
+        title += f" — {group_title}"
+    return Timesheet(year, month, title, tuple(rows))

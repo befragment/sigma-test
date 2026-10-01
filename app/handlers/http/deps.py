@@ -5,6 +5,7 @@ from fastapi import Depends, Header, HTTPException, Request, status
 
 from app.services.directory import DirectoryService
 from app.services.review import ReviewService
+from app.services.timesheet import TimesheetService
 
 
 def require_admin(
@@ -24,5 +25,10 @@ def _review(request: Request) -> ReviewService:
     return request.app.state.services.review
 
 
+def _timesheets(request: Request) -> TimesheetService:
+    return request.app.state.services.timesheet
+
+
 Directory = Annotated[DirectoryService, Depends(_directory)]
 Review = Annotated[ReviewService, Depends(_review)]
+Timesheets = Annotated[TimesheetService, Depends(_timesheets)]

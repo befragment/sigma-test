@@ -22,6 +22,7 @@ from app.services.directory import DirectoryService
 from app.services.ingest import IngestService
 from app.services.processing import ProcessingService
 from app.services.review import ReviewService
+from app.services.timesheet import TimesheetService
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,7 @@ class Services:
     processing: ProcessingService
     directory: DirectoryService
     review: ReviewService
+    timesheet: TimesheetService
 
 
 def _log_crash(task: asyncio.Task) -> None:
@@ -56,6 +58,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             processing=ProcessingService(uow_factory, settings.batch_size),
             directory=DirectoryService(uow_factory),
             review=ReviewService(uow_factory),
+            timesheet=TimesheetService(uow_factory),
         )
         app.state.services = services
 
